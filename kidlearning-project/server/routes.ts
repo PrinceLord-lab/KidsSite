@@ -1,35 +1,12 @@
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
-import { storage } from "./storage";
-import { insertUserSchema, insertProgressSchema, insertActivitySchema } from "@shared/schema";
-import session from "express-session";
-import { ZodError } from "zod";
-import { fromZodError } from "zod-validation-error";
-import MemoryStore from "memorystore";
 
 export async function registerRoutes(app: Express): Promise<Server> {
-  // Setup session middleware
-  const MemorySessionStore = MemoryStore(session);
-  app.use(
-    session({
-      secret: "kidlearn-session-secret",
-      resave: false,
-      saveUninitialized: false,
-      store: new MemorySessionStore({
-        checkPeriod: 86400000, // prune expired entries every 24h
-      }),
-      cookie: {
-        maxAge: 7 * 24 * 60 * 60 * 1000, // 1 week
-      },
-    })
-  );
-  
   // Content routes (no authentication required)
   app.get("/api/content/:category", (req, res) => {
     const { category } = req.params;
     
     // Return content based on category (alphabets, numbers, shapes)
-    // This is a simplified example of serving content without authentication
     const content = {
       alphabets: ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", 
                   "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"],
@@ -37,243 +14,188 @@ export async function registerRoutes(app: Express): Promise<Server> {
       shapes: ["circle", "square", "triangle", "rectangle", "oval", "diamond", "star", "heart"]
     };
     
-    if (!content[category]) {
+    if (!content[category as keyof typeof content]) {
       return res.status(404).json({ message: "Category not found" });
     }
     
-    return res.json(content[category]);
+    return res.json(content[category as keyof typeof content]);
   });
   
-  // Auth routes
-  app.post("/api/auth/login", async (req, res) => {
-    try {
-      const { username, password, isParent = false } = req.body;
-      
-      // For child login (avatar-based)
-      if (!isParent) {
-        const user = await storage.getUserByUsername(username);
-        if (!user) {
-          return res.status(404).json({ message: "User not found" });
-        }
-        
-        if (user.isParent) {
-          return res.status(403).json({ message: "Invalid login type" });
-        }
-        
-        req.session.userId = user.id;
-        return res.json({ 
-          id: user.id, 
-          username: user.username,
-          childAvatar: user.childAvatar,
-          childName: user.childName,
-          isParent: user.isParent
-        });
+  // Lesson content API - get info about a specific item
+  app.get("/api/lessons/:category/:item", (req, res) => {
+    const { category, item } = req.params;
+    
+    // Example content structure - in a real app, this would be stored in a database
+    const lessonContent = {
+      alphabets: {
+        A: {
+          examples: ["Apple", "Astronaut", "Alligator"],
+          description: "The first letter of the alphabet",
+          funFact: "A is the most common letter in the English language!"
+        },
+        B: {
+          examples: ["Ball", "Balloon", "Banana"],
+          description: "The second letter of the alphabet",
+          funFact: "The letter B initially appeared as a pictograph of a house!"
+        },
+        // Other letters would be defined similarly
+      },
+      numbers: {
+        1: {
+          examples: ["One apple", "One finger", "One sun"],
+          description: "The first number",
+          funFact: "The number 1 is neither prime nor composite!"
+        },
+        2: {
+          examples: ["Two eyes", "Two hands", "Two feet"],
+          description: "The second number",
+          funFact: "Two is the only even prime number!"
+        },
+        // Other numbers would be defined similarly
+      },
+      shapes: {
+        circle: {
+          examples: ["Sun", "Ball", "Wheel"],
+          description: "A round shape with no corners",
+          funFact: "A circle has infinite sides!"
+        },
+        square: {
+          examples: ["Checkerboard", "Window", "Picture frame"],
+          description: "A shape with four equal sides and four right angles",
+          funFact: "A square is a special case of a rectangle where all sides are equal!"
+        },
+        // Other shapes would be defined similarly
       }
-      
-      // For parent/teacher login (username/password)
-      if (!password) {
-        return res.status(400).json({ message: "Password is required" });
-      }
-      
-      const user = await storage.getUserByUsername(username);
-      if (!user || user.password !== password) {
-        return res.status(401).json({ message: "Invalid credentials" });
-      }
-      
-      if (!user.isParent) {
-        return res.status(403).json({ message: "Invalid login type" });
-      }
-      
-      req.session.userId = user.id;
-      return res.json({ 
-        id: user.id, 
-        username: user.username,
-        isParent: user.isParent
-      });
-    } catch (error) {
-      if (error instanceof ZodError) {
-        return res.status(400).json({ message: fromZodError(error).message });
-      }
-      return res.status(500).json({ message: "Internal server error" });
+    };
+    
+    // Check if category exists
+    if (!lessonContent[category as keyof typeof lessonContent]) {
+      return res.status(404).json({ message: "Category not found" });
     }
-  });
-  
-  // Google authentication
-  app.post("/api/auth/google-login", async (req, res) => {
-    try {
-      const { email, displayName, photoURL, uid } = req.body;
-      
-      if (!email) {
-        return res.status(400).json({ message: "Email is required" });
-      }
-      
-      // Check if user already exists
-      let user = await storage.getUserByUsername(email);
-      
-      // Create a new user if it doesn't exist
-      if (!user) {
-        const newUser = {
-          username: email,
-          email,
-          password: `google-${uid}`, // We don't use this for login, but schema requires it
-          isParent: true, // Google accounts are considered parent accounts
-          childName: displayName || email.split("@")[0],
-          childAvatar: photoURL || undefined
-        };
-        
-        user = await storage.createUser(newUser);
-      }
-      
-      req.session.userId = user.id;
-      
-      // Don't send password back
-      const { password, ...userWithoutPassword } = user;
-      return res.json(userWithoutPassword);
-    } catch (error) {
-      if (error instanceof ZodError) {
-        return res.status(400).json({ message: fromZodError(error).message });
-      }
-      console.error("Google login error:", error);
-      return res.status(500).json({ message: "Internal server error during Google login" });
+    
+    // Check if item exists in category
+    const categoryContent = lessonContent[category as keyof typeof lessonContent] as any;
+    if (!categoryContent[item]) {
+      return res.status(404).json({ message: "Item not found in category" });
     }
-  });
-  
-  app.post("/api/auth/logout", (req, res) => {
-    req.session.destroy((err) => {
-      if (err) {
-        return res.status(500).json({ message: "Failed to logout" });
-      }
-      res.clearCookie("connect.sid");
-      return res.json({ success: true });
+    
+    // Return lesson content
+    return res.json({
+      category,
+      item,
+      content: categoryContent[item]
     });
   });
   
-  app.get("/api/auth/me", async (req, res) => {
-    if (!req.session.userId) {
-      return res.status(401).json({ message: "Not authenticated" });
+  // Quiz API - get quiz questions for a specific category or item
+  app.get("/api/quiz/:category/:item?", (req, res) => {
+    const { category, item } = req.params;
+    
+    // Generate quiz questions based on category/item
+    // In a real app, this would be more sophisticated
+    let questions = [];
+    
+    if (category === 'alphabets') {
+      if (item) {
+        // Quiz for specific letter
+        questions = [
+          {
+            question: `Which word starts with the letter ${item}?`,
+            options: ["Apple", "Banana", "Cherry", "Dog"],
+            correctAnswer: "Apple" // This would be dynamically generated based on the letter
+          },
+          {
+            question: `What comes after the letter ${item}?`,
+            options: ["B", "C", "D", "E"],
+            correctAnswer: "B" // This would be dynamically generated based on the letter
+          }
+        ];
+      } else {
+        // General alphabet quiz
+        questions = [
+          {
+            question: "Which letter comes first in the alphabet?",
+            options: ["B", "A", "C", "D"],
+            correctAnswer: "A"
+          },
+          {
+            question: "How many letters are in the English alphabet?",
+            options: ["24", "25", "26", "27"],
+            correctAnswer: "26"
+          }
+        ];
+      }
+    } else if (category === 'numbers') {
+      if (item) {
+        // Quiz for specific number
+        questions = [
+          {
+            question: `What number comes after ${item}?`,
+            options: ["1", "2", "3", "4"],
+            correctAnswer: "2" // This would be dynamically generated based on the number
+          },
+          {
+            question: `If you have ${item} apple and get ${item} more, how many do you have?`,
+            options: ["1", "2", "3", "4"],
+            correctAnswer: "2" // This would be dynamically generated based on the number
+          }
+        ];
+      } else {
+        // General number quiz
+        questions = [
+          {
+            question: "Which number is greater: 3 or 5?",
+            options: ["3", "5", "They are equal", "Cannot determine"],
+            correctAnswer: "5"
+          },
+          {
+            question: "What is 2 + 2?",
+            options: ["3", "4", "5", "6"],
+            correctAnswer: "4"
+          }
+        ];
+      }
+    } else if (category === 'shapes') {
+      if (item) {
+        // Quiz for specific shape
+        questions = [
+          {
+            question: `How many sides does a ${item} have?`,
+            options: ["3", "4", "Many", "0"],
+            correctAnswer: item === "circle" ? "0" : (item === "square" ? "4" : "3") // Simplified example
+          },
+          {
+            question: `Which of these is a ${item}?`,
+            options: ["Ball", "Box", "Book", "Pencil"],
+            correctAnswer: "Ball" // This would be dynamically generated based on the shape
+          }
+        ];
+      } else {
+        // General shape quiz
+        questions = [
+          {
+            question: "Which shape has 3 sides?",
+            options: ["Circle", "Square", "Triangle", "Rectangle"],
+            correctAnswer: "Triangle"
+          },
+          {
+            question: "What shape is a ball?",
+            options: ["Sphere", "Cube", "Cone", "Pyramid"],
+            correctAnswer: "Sphere"
+          }
+        ];
+      }
+    } else {
+      return res.status(404).json({ message: "Category not found" });
     }
     
-    const user = await storage.getUser(req.session.userId);
-    if (!user) {
-      return res.status(404).json({ message: "User not found" });
-    }
-    
-    // Don't send password
-    const { password, ...userWithoutPassword } = user;
-    return res.json(userWithoutPassword);
+    return res.json({
+      category,
+      item,
+      questions
+    });
   });
-  
-  // Progress routes
-  app.get("/api/progress", async (req, res) => {
-    try {
-      if (!req.session.userId) {
-        return res.status(401).json({ message: "Not authenticated" });
-      }
-      
-      const category = req.query.category as string | undefined;
-      const userId = req.query.userId ? parseInt(req.query.userId as string) : req.session.userId;
-      
-      // If requesting another user's progress, ensure the requester is a parent
-      if (userId !== req.session.userId) {
-        const requester = await storage.getUser(req.session.userId);
-        if (!requester?.isParent) {
-          return res.status(403).json({ message: "Permission denied" });
-        }
-      }
-      
-      const progress = await storage.getProgress(userId, category);
-      return res.json(progress);
-    } catch (error) {
-      return res.status(500).json({ message: "Internal server error" });
-    }
-  });
-  
-  app.post("/api/progress", async (req, res) => {
-    try {
-      if (!req.session.userId) {
-        return res.status(401).json({ message: "Not authenticated" });
-      }
-      
-      const data = insertProgressSchema.parse({
-        ...req.body,
-        userId: req.session.userId
-      });
-      
-      const updatedProgress = await storage.updateProgress(data);
-      return res.json(updatedProgress);
-    } catch (error) {
-      if (error instanceof ZodError) {
-        return res.status(400).json({ message: fromZodError(error).message });
-      }
-      return res.status(500).json({ message: "Internal server error" });
-    }
-  });
-  
-  // Activity routes
-  app.get("/api/activities", async (req, res) => {
-    try {
-      if (!req.session.userId) {
-        return res.status(401).json({ message: "Not authenticated" });
-      }
-      
-      const limit = req.query.limit ? parseInt(req.query.limit as string) : 10;
-      const userId = req.query.userId ? parseInt(req.query.userId as string) : req.session.userId;
-      
-      // If requesting another user's activities, ensure the requester is a parent
-      if (userId !== req.session.userId) {
-        const requester = await storage.getUser(req.session.userId);
-        if (!requester?.isParent) {
-          return res.status(403).json({ message: "Permission denied" });
-        }
-      }
-      
-      const activities = await storage.getActivities(userId, limit);
-      return res.json(activities);
-    } catch (error) {
-      return res.status(500).json({ message: "Internal server error" });
-    }
-  });
-  
-  app.post("/api/activities", async (req, res) => {
-    try {
-      if (!req.session.userId) {
-        return res.status(401).json({ message: "Not authenticated" });
-      }
-      
-      const data = insertActivitySchema.parse({
-        ...req.body,
-        userId: req.session.userId
-      });
-      
-      const activity = await storage.createActivity(data);
-      return res.json(activity);
-    } catch (error) {
-      if (error instanceof ZodError) {
-        return res.status(400).json({ message: fromZodError(error).message });
-      }
-      return res.status(500).json({ message: "Internal server error" });
-    }
-  });
-  
-  // Parent routes
-  app.get("/api/parent/children", async (req, res) => {
-    try {
-      if (!req.session.userId) {
-        return res.status(401).json({ message: "Not authenticated" });
-      }
-      
-      const user = await storage.getUser(req.session.userId);
-      if (!user?.isParent) {
-        return res.status(403).json({ message: "Permission denied" });
-      }
-      
-      const children = await storage.getChildrenByParentId(user.id);
-      return res.json(children);
-    } catch (error) {
-      return res.status(500).json({ message: "Internal server error" });
-    }
-  });
-  
-  const httpServer = createServer(app);
-  return httpServer;
+
+  const server = createServer(app);
+  return server;
 }

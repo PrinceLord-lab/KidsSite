@@ -1,9 +1,7 @@
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
-import { useLocation } from "wouter";
-import { useToast } from "@/hooks/use-toast";
-import { apiRequest } from "@/lib/queryClient";
-import { signInWithGoogle, isFirebaseConfigured } from "@/lib/firebase";
+import { createContext, useContext, useState, ReactNode } from "react";
 
+// Simplified AuthContext that doesn't require actual authentication
+// but maintains the interface for compatibility with existing components
 export interface User {
   id: number;
   username: string;
@@ -25,143 +23,47 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | null>(null);
 
+// Create a dummy guest user for the simplified application
+const guestUser: User = {
+  id: 1,
+  username: "guest",
+  isParent: false,
+  childAvatar: "blue",
+  childName: "Guest",
+};
+
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [isGuest, setIsGuest] = useState(false);
-  const [, setLocation] = useLocation();
-  const { toast } = useToast();
+  // Always set user to the guest user and not loading
+  const [user, setUser] = useState<User | null>(guestUser);
+  const [loading, setLoading] = useState(false);
+  const [isGuest, setIsGuest] = useState(true);
 
-  // Check if user is already logged in
-  useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        const response = await fetch("/api/auth/me", {
-          credentials: "include",
-        });
-        
-        if (response.ok) {
-          const userData = await response.json();
-          setUser(userData);
-        }
-      } catch (error) {
-        console.error("Auth check failed:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    
-    checkAuth();
-  }, []);
-
-  const login = async (username: string, password?: string, isParent = false) => {
-    try {
-      setLoading(true);
-      const response = await apiRequest("POST", "/api/auth/login", {
-        username,
-        password,
-        isParent
-      });
-      
-      const userData = await response.json();
-      setUser(userData);
-      setIsGuest(false);
-      
-      setLocation("/home");
-      
-      toast({
-        title: "Welcome!",
-        description: `You are now logged in as ${isParent ? username : userData.childName}`,
-      });
-    } catch (error) {
-      console.error("Login failed:", error);
-      toast({
-        title: "Login Failed",
-        description: error instanceof Error ? error.message : "Please check your credentials and try again",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
+  // Dummy authentication functions that do nothing
+  const login = async () => {
+    console.log("Login functionality removed in simplified version");
+    return Promise.resolve();
   };
 
   const loginWithGoogle = async () => {
-    if (!isFirebaseConfigured()) {
-      toast({
-        title: "Configuration Error",
-        description: "Google login is not configured. Please provide Firebase API keys.",
-        variant: "destructive",
-      });
-      return;
-    }
-
-    try {
-      setLoading(true);
-      const googleUser = await signInWithGoogle();
-      
-      // If Google login successful, register/login with backend
-      if (googleUser) {
-        const response = await apiRequest("POST", "/api/auth/google-login", {
-          email: googleUser.email,
-          displayName: googleUser.displayName,
-          photoURL: googleUser.photoURL,
-          uid: googleUser.uid,
-        });
-        
-        const userData = await response.json();
-        setUser(userData);
-        setIsGuest(false);
-        
-        setLocation("/home");
-        
-        toast({
-          title: "Welcome!",
-          description: `You are now logged in as ${userData.username}`,
-        });
-      }
-    } catch (error) {
-      console.error("Google login failed:", error);
-      toast({
-        title: "Login Failed",
-        description: "Error signing in with Google. Please try again.",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
+    console.log("Google login functionality removed in simplified version");
+    return Promise.resolve();
   };
 
   const logout = async () => {
-    try {
-      setLoading(true);
-      
-      // Only call logout API if not a guest
-      if (!isGuest && user) {
-        await apiRequest("POST", "/api/auth/logout");
-      }
-      
-      setUser(null);
-      setIsGuest(false);
-      setLocation("/");
-      
-      toast({
-        title: "Logged Out",
-        description: "You have been successfully logged out",
-      });
-    } catch (error) {
-      console.error("Logout failed:", error);
-      toast({
-        title: "Logout Failed",
-        description: "An error occurred during logout",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
+    console.log("Logout functionality removed in simplified version");
+    return Promise.resolve();
   };
 
   return (
-    <AuthContext.Provider value={{user, loading, login, loginWithGoogle, logout, isGuest, setIsGuest}}>
+    <AuthContext.Provider value={{
+      user, 
+      loading, 
+      login, 
+      loginWithGoogle, 
+      logout, 
+      isGuest, 
+      setIsGuest
+    }}>
       {children}
     </AuthContext.Provider>
   );
